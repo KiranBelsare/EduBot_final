@@ -1,3 +1,4 @@
+// Llama (OpenRouter)
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
 declare const Deno: any;
@@ -70,27 +71,34 @@ Back: ...
   }
 }
 
-/* -------------------- Gemini AI -------------------- */
+/* -------------------- OpenRouter + Llama 3 -------------------- */
 async function generateAIResponse(
   mode: Mode,
   content: string
 ): Promise<string> {
-  const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
-  if (!GEMINI_API_KEY) {
-    throw new Error("GEMINI_API_KEY not configured");
+  const OPENROUTER_API_KEY = Deno.env.get("OPENROUTER_API_KEY");
+  if (!OPENROUTER_API_KEY) {
+    throw new Error("OPENROUTER_API_KEY not configured");
   }
 
   const prompt = buildPrompt(mode, content);
 
   const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+    "https://openrouter.ai/api/v1/chat/completions",
     {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${OPENROUTER_API_KEY}`,
+        "HTTP-Referer": "https://edu-bot-final.vercel.app",
+        "X-Title": "EduBot - AI Study Assistant",
+      },
       body: JSON.stringify({
-        contents: [
+        model: "meta-llama/llama-3-8b-instruct",
+        messages: [
           {
-            parts: [{ text: prompt }],
+            role: "user",
+            content: prompt,
           },
         ],
       }),
@@ -99,15 +107,18 @@ async function generateAIResponse(
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error("Gemini API error:", errorText);
+    console.error("OpenRouter API error:", errorText);
     throw new Error("AI service unavailable");
   }
 
   const data = await response.json();
-  return (
-    data.candidates?.[0]?.content?.parts?.[0]?.text ??
-    "No response generated."
-  );
+  const text = data?.choices?.[0]?.message?.content;
+
+  if (!text) {
+    throw new Error("Empty AI response");
+  }
+
+  return text;
 }
 
 /* -------------------- Server -------------------- */
@@ -149,6 +160,169 @@ Deno.serve(async (req: Request) => {
     );
   }
 });
+
+
+
+
+
+
+
+
+
+
+
+// // Gemini
+// import "jsr:@supabase/functions-js/edge-runtime.d.ts";
+
+// declare const Deno: any;
+
+// /* -------------------- CORS -------------------- */
+// const corsHeaders = {
+//   "Access-Control-Allow-Origin": "*",
+//   "Access-Control-Allow-Methods": "POST, OPTIONS",
+//   "Access-Control-Allow-Headers":
+//     "Content-Type, Authorization, X-Client-Info, Apikey",
+// };
+
+// /* -------------------- Types -------------------- */
+// type Mode = "explain" | "summarize" | "quiz" | "flashcard";
+
+// interface RequestBody {
+//   mode: Mode;
+//   content: string;
+// }
+
+// /* -------------------- Prompt Builder -------------------- */
+// function buildPrompt(mode: Mode, topic: string): string {
+//   const base = `
+// You are an expert academic teacher.
+
+// The topic is: "${topic}"
+
+// If the topic is ambiguous, assume the MOST COMMON ACADEMIC meaning
+// (e.g. "current" = electric current in physics).
+
+// Rules:
+// - No generic study advice
+// - No vague explanations
+// - Use real academic knowledge
+// - Be clear, factual, and structured
+// `;
+
+//   switch (mode) {
+//     case "explain":
+//       return `
+// ${base}
+// Explain the topic in detail.
+// Include definition, process, formulas (if any), and examples.
+// `;
+
+//     case "summarize":
+//       return `
+// ${base}
+// Summarize the topic using bullet points.
+// Include key definitions and processes.
+// `;
+
+//     case "quiz":
+//       return `
+// ${base}
+// Create 5 multiple-choice questions.
+// Each question must have 4 options (A–D).
+// Clearly mark the correct answer.
+// `;
+
+//     case "flashcard":
+//       return `
+// ${base}
+// Create 5 study flashcards.
+
+// Format exactly:
+// Front: ...
+// Back: ...
+// `;
+//   }
+// }
+
+// /* -------------------- Gemini AI -------------------- */
+// async function generateAIResponse(
+//   mode: Mode,
+//   content: string
+// ): Promise<string> {
+//   const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
+//   if (!GEMINI_API_KEY) {
+//     throw new Error("GEMINI_API_KEY not configured");
+//   }
+
+//   const prompt = buildPrompt(mode, content);
+
+//   const response = await fetch(
+//     `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`,
+//     {
+//       method: "POST",
+//       headers: { "Content-Type": "application/json" },
+//       body: JSON.stringify({
+//         contents: [
+//           {
+//             parts: [{ text: prompt }],
+//           },
+//         ],
+//       }),
+//     }
+//   );
+
+//   if (!response.ok) {
+//     const errorText = await response.text();
+//     console.error("Gemini API error:", errorText);
+//     throw new Error("AI service unavailable");
+//   }
+
+//   const data = await response.json();
+//   return (
+//     data.candidates?.[0]?.content?.parts?.[0]?.text ??
+//     "No response generated."
+//   );
+// }
+
+// /* -------------------- Server -------------------- */
+// Deno.serve(async (req: Request) => {
+//   if (req.method === "OPTIONS") {
+//     return new Response(null, { status: 200, headers: corsHeaders });
+//   }
+
+//   try {
+//     const { mode, content } = (await req.json()) as RequestBody;
+
+//     if (!mode || !content) {
+//       return new Response(
+//         JSON.stringify({ error: "Missing mode or content" }),
+//         {
+//           status: 400,
+//           headers: { ...corsHeaders, "Content-Type": "application/json" },
+//         }
+//       );
+//     }
+
+//     const response = await generateAIResponse(mode, content.trim());
+
+//     return new Response(JSON.stringify({ response }), {
+//       status: 200,
+//       headers: { ...corsHeaders, "Content-Type": "application/json" },
+//     });
+//   } catch (error) {
+//     console.error("Function Error:", error);
+//     return new Response(
+//       JSON.stringify({
+//         error: "Unable to process request",
+//         details: error instanceof Error ? error.message : "Unknown error",
+//       }),
+//       {
+//         status: 500,
+//         headers: { ...corsHeaders, "Content-Type": "application/json" },
+//       }
+//     );
+//   }
+// });
 
 
 
