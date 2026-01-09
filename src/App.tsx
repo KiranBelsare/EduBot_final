@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { BookOpen, FileText, Brain, Layers, History, Loader2 } from 'lucide-react';
+import { BookOpen, FileText, Brain, Layers, History, Loader2, Trash2 } from 'lucide-react';
 import { supabase, StudySession } from './lib/supabase';
 
 type Mode = 'explain' | 'summarize' | 'quiz' | 'flashcard';
@@ -7,190 +7,303 @@ type Mode = 'explain' | 'summarize' | 'quiz' | 'flashcard';
 function App() {
   const [mode, setMode] = useState<Mode>('explain');
   const [input, setInput] = useState('');
-  const [response, setResponse] = useState('');
+  const [output, setOutput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [sessions, setSessions] = useState<StudySession[]>([]);
+  const [history, setHistory] = useState<StudySession[]>([]);
   const [showHistory, setShowHistory] = useState(false);
 
   useEffect(() => {
-    loadSessions();
+    loadHistory();
   }, []);
 
-  const loadSessions = async () => {
-    const { data } = await supabase
-      .from('study_sessions')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(10);
+  const loadHistory = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('study_sessions')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(10);
 
-    if (data) setSessions(data);
+      if (error) throw error;
+      setHistory(data || []);
+    } catch (error) {
+      console.error('Error loading history:', error);
+    }
   };
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
     if (!input.trim()) return;
 
     setLoading(true);
-    setResponse('');
+    setOutput('');
 
     try {
-      const apiUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/study-buddy-ai`;
-      const headers = {
-        'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-        'Content-Type': 'application/json',
-      };
-
-      const res = await fetch(apiUrl, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ mode, content: input }),
+      const { data, error } = await supabase.functions.invoke('study-buddy-ai', {
+        body: { mode, content: input }
       });
 
-      const data = await res.json();
-      setResponse(data.response);
+      if (error) throw error;
 
-      await supabase.from('study_sessions').insert({
-        title: input.slice(0, 100),
-        session_type: mode,
-        input_content: input,
-        ai_response: data.response,
-      });
+      const aiResponse = data.response;
+      setOutput(aiResponse);
 
-      await loadSessions();
-    } catch {
-      setResponse('Error: Unable to process request. Please try again.');
+      // Save to database
+      const { error: saveError } = await supabase
+        .from('study_sessions')
+        .insert({
+          title: input.substring(0, 100),
+          session_type: mode,
+          input_content: input,
+          ai_response: aiResponse
+        });
+
+      if (saveError) throw saveError;
+
+      // Reload history
+      await loadHistory();
+    } catch (error) {
+      console.error('Error:', error);
+      setOutput('❌ An error occurred. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
   const loadSession = (session: StudySession) => {
-    setMode(session.session_type);
     setInput(session.input_content);
-    setResponse(session.ai_response);
+    setOutput(session.ai_response);
+    setMode(session.session_type as Mode);
     setShowHistory(false);
   };
 
+  const deleteSession = async (id: string) => {
+    try {
+      const { error } = await supabase
+        .from('study_sessions')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+      await loadHistory();
+    } catch (error) {
+      console.error('Error deleting session:', error);
+    }
+  };
+
+  const clearAll = () => {
+    setInput('');
+    setOutput('');
+  };
+
   const modes = [
-    { id: 'explain', label: 'Explain Topic', icon: Brain, color: 'bg-blue-500' },
-    { id: 'summarize', label: 'Summarize Notes', icon: FileText, color: 'bg-green-500' },
-    { id: 'quiz', label: 'Generate Quiz', icon: Layers, color: 'bg-purple-500' },
-    { id: 'flashcard', label: 'Create Flashcards', icon: BookOpen, color: 'bg-orange-500' },
+    { id: 'explain' as Mode, icon: BookOpen, label: 'Explain', color: 'blue' },
+    { id: 'summarize' as Mode, icon: FileText, label: 'Summarize', color: 'green' },
+    { id: 'quiz' as Mode, icon: Brain, label: 'Quiz', color: 'purple' },
+    { id: 'flashcard' as Mode, icon: Layers, label: 'Flashcards', color: 'orange' }
   ];
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
-      <div className="container mx-auto px-4 py-8 max-w-6xl">
-        <header className="text-center mb-12">
-          <div className="flex items-center justify-center gap-3 mb-4">
-            <Brain className="w-12 h-12 text-blue-600" />
-            <h1 className="text-4xl font-bold text-slate-800">AI Study Buddy</h1>
-          </div>
-          <p className="text-slate-600 text-lg">Your intelligent learning companion for better understanding</p>
-        </header>
+  const getColorClasses = (color: string, active: boolean) => {
+    const colors = {
+      blue: active ? 'bg-blue-500 text-white' : 'bg-blue-50 text-blue-700 hover:bg-blue-100',
+      green: active ? 'bg-green-500 text-white' : 'bg-green-50 text-green-700 hover:bg-green-100',
+      purple: active ? 'bg-purple-500 text-white' : 'bg-purple-50 text-purple-700 hover:bg-purple-100',
+      orange: active ? 'bg-orange-500 text-white' : 'bg-orange-50 text-orange-700 hover:bg-orange-100'
+    };
+    return colors[color as keyof typeof colors];
+  };
 
-        <div className="grid lg:grid-cols-3 gap-6">
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
+      {/* Header */}
+      <header className="bg-white shadow-sm border-b border-slate-200">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="bg-gradient-to-br from-blue-500 to-purple-600 p-3 rounded-xl shadow-lg">
+                <BookOpen className="w-8 h-8 text-white" />
+              </div>
+              <div>
+                <h1 className="text-3xl font-bold text-slate-800">EduBot</h1>
+                <p className="text-slate-600 text-sm">Your AI Study Companion</p>
+              </div>
+            </div>
+            <button
+              onClick={() => setShowHistory(!showHistory)}
+              className="flex items-center gap-2 px-4 py-2 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors"
+            >
+              <History className="w-5 h-5" />
+              <span className="font-medium">History</span>
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Main Content */}
           <div className="lg:col-span-2 space-y-6">
-            <div className="bg-white rounded-xl shadow-md p-6">
-              <h2 className="text-xl font-semibold mb-4 text-slate-800">Choose Your Learning Mode</h2>
-              <div className="grid sm:grid-cols-2 gap-3">
-                {modes.map((m) => {
-                  const Icon = m.icon;
-                  return (
-                    <button
-                      key={m.id}
-                      onClick={() => setMode(m.id as Mode)}
-                      className={`flex items-center gap-3 p-4 rounded-lg border-2 transition-all ${
-                        mode === m.id
-                          ? `${m.color} text-white border-transparent`
-                          : 'bg-white text-slate-700 border-slate-200 hover:border-slate-300'
-                      }`}
-                    >
-                      <Icon className="w-5 h-5" />
-                      <span className="font-medium">{m.label}</span>
-                    </button>
-                  );
-                })}
+            {/* Mode Selection */}
+            <div className="bg-white rounded-2xl shadow-lg p-6">
+              <h2 className="text-xl font-bold text-slate-800 mb-4">Choose Your Study Mode</h2>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                {modes.map((m) => (
+                  <button
+                    key={m.id}
+                    onClick={() => setMode(m.id)}
+                    className={`flex flex-col items-center gap-2 p-4 rounded-xl transition-all ${getColorClasses(m.color, mode === m.id)}`}
+                  >
+                    <m.icon className="w-6 h-6" />
+                    <span className="font-semibold text-sm">{m.label}</span>
+                  </button>
+                ))}
               </div>
             </div>
 
-            <div className="bg-white rounded-xl shadow-md p-6">
-              <h2 className="text-xl font-semibold mb-4 text-slate-800">Enter Your Content</h2>
-              <textarea
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder={`Enter the ${mode === 'explain' ? 'topic you want to understand' : mode === 'summarize' ? 'notes you want to summarize' : mode === 'quiz' ? 'topic for quiz generation' : 'content for flashcards'}...`}
-                className="w-full h-32 p-4 border-2 border-slate-200 rounded-lg focus:border-blue-500 focus:outline-none resize-none"
-              />
-              <button
-                onClick={handleSubmit}
-                disabled={loading || !input.trim()}
-                className="mt-4 w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 text-white font-semibold py-3 px-6 rounded-lg transition-colors flex items-center justify-center gap-2"
-              >
-                {loading ? (
-                  <>
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                    Processing...
-                  </>
-                ) : (
-                  'Generate'
-                )}
-              </button>
+            {/* Input Form */}
+            <div className="bg-white rounded-2xl shadow-lg p-6">
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 mb-2">
+                    What would you like to learn about?
+                  </label>
+                  <textarea
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    placeholder="Enter your topic, notes, or question here..."
+                    className="w-full px-4 py-3 border-2 border-slate-200 rounded-xl focus:border-blue-500 focus:outline-none resize-none"
+                    rows={6}
+                    disabled={loading}
+                  />
+                </div>
+                <div className="flex gap-3">
+                  <button
+                    type="submit"
+                    disabled={loading || !input.trim()}
+                    className="flex-1 bg-gradient-to-r from-blue-500 to-purple-600 text-white font-semibold py-3 px-6 rounded-xl hover:shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                  >
+                    {loading ? (
+                      <>
+                        <Loader2 className="w-5 h-5 animate-spin" />
+                        Processing...
+                      </>
+                    ) : (
+                      <>Generate {modes.find(m => m.id === mode)?.label}</>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={clearAll}
+                    className="px-6 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold rounded-xl transition-colors"
+                  >
+                    Clear
+                  </button>
+                </div>
+              </form>
             </div>
 
-            {response && (
-              <div className="bg-white rounded-xl shadow-md p-6">
-                <h2 className="text-xl font-semibold mb-4 text-slate-800">AI Response</h2>
-                <div className="prose prose-slate max-w-none whitespace-pre-wrap text-slate-700">
-                  {response}
+            {/* Output */}
+            {output && (
+              <div className="bg-white rounded-2xl shadow-lg p-6">
+                <h2 className="text-xl font-bold text-slate-800 mb-4">Result</h2>
+                <div className="prose prose-slate max-w-none">
+                  <div className="whitespace-pre-wrap text-slate-700 leading-relaxed">
+                    {output}
+                  </div>
                 </div>
               </div>
             )}
           </div>
 
-          <div className="lg:col-span-1">
-            <div className="bg-white rounded-xl shadow-md p-6 sticky top-8">
-              <button
-                onClick={() => setShowHistory(!showHistory)}
-                className="flex items-center gap-2 text-lg font-semibold mb-4 text-slate-800 hover:text-blue-600 transition-colors"
-              >
-                <History className="w-5 h-5" />
-                Recent Sessions
-              </button>
+          {/* Sidebar */}
+          <div className="space-y-6">
+            {/* Quick Tips */}
+            <div className="bg-gradient-to-br from-blue-500 to-purple-600 rounded-2xl shadow-lg p-6 text-white">
+              <h3 className="text-lg font-bold mb-3">💡 Quick Tips</h3>
+              <ul className="space-y-2 text-sm">
+                <li>• Be specific with your questions</li>
+                <li>• Use Explain for detailed understanding</li>
+                <li>• Summarize helps condense long notes</li>
+                <li>• Quiz tests your knowledge</li>
+                <li>• Flashcards for memorization</li>
+              </ul>
+            </div>
 
-              {showHistory && (
-                <div className="space-y-2 max-h-96 overflow-y-auto">
-                  {sessions.length === 0 ? (
-                    <p className="text-slate-500 text-sm">No sessions yet</p>
+            {/* History Panel */}
+            {showHistory && (
+              <div className="bg-white rounded-2xl shadow-lg p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-bold text-slate-800">Recent Sessions</h3>
+                  <button
+                    onClick={() => setShowHistory(false)}
+                    className="text-slate-400 hover:text-slate-600"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <div className="space-y-3 max-h-96 overflow-y-auto">
+                  {history.length === 0 ? (
+                    <p className="text-slate-500 text-sm text-center py-4">No history yet</p>
                   ) : (
-                    sessions.map((session) => (
-                      <button
+                    history.map((session) => (
+                      <div
                         key={session.id}
-                        onClick={() => loadSession(session)}
-                        className="w-full text-left p-3 rounded-lg border border-slate-200 hover:border-blue-500 hover:bg-blue-50 transition-all"
+                        className="border border-slate-200 rounded-lg p-3 hover:bg-slate-50 transition-colors"
                       >
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className={`text-xs font-medium px-2 py-1 rounded ${
-                            session.session_type === 'explain' ? 'bg-blue-100 text-blue-700' :
-                            session.session_type === 'summarize' ? 'bg-green-100 text-green-700' :
-                            session.session_type === 'quiz' ? 'bg-purple-100 text-purple-700' :
-                            'bg-orange-100 text-orange-700'
-                          }`}>
-                            {session.session_type}
-                          </span>
+                        <div className="flex items-start justify-between gap-2">
+                          <button
+                            onClick={() => loadSession(session)}
+                            className="flex-1 text-left"
+                          >
+                            <p className="font-medium text-slate-800 text-sm line-clamp-2">
+                              {session.title}
+                            </p>
+                            <p className="text-xs text-slate-500 mt-1">
+                              {session.session_type} • {new Date(session.created_at).toLocaleDateString()}
+                            </p>
+                          </button>
+                          <button
+                            onClick={() => deleteSession(session.id)}
+                            className="text-red-400 hover:text-red-600 p-1"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
                         </div>
-                        <p className="text-sm text-slate-700 truncate">{session.title}</p>
-                        <p className="text-xs text-slate-500 mt-1">
-                          {new Date(session.created_at).toLocaleDateString()}
-                        </p>
-                      </button>
+                      </div>
                     ))
                   )}
                 </div>
-              )}
+              </div>
+            )}
+
+            {/* Stats */}
+            <div className="bg-white rounded-2xl shadow-lg p-6">
+              <h3 className="text-lg font-bold text-slate-800 mb-4">📊 Your Progress</h3>
+              <div className="space-y-3">
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-600">Total Sessions</span>
+                  <span className="font-bold text-blue-600">{history.length}</span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-slate-600">Favorite Mode</span>
+                  <span className="font-bold text-purple-600">
+                    {mode.charAt(0).toUpperCase() + mode.slice(1)}
+                  </span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
       </div>
+
+      {/* Footer */}
+      <footer className="bg-white border-t border-slate-200 mt-12">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          <p className="text-center text-slate-600 text-sm">
+            Made with ❤️ for students everywhere
+          </p>
+        </div>
+      </footer>
     </div>
   );
 }
