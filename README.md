@@ -1,6 +1,7 @@
 # EduBot - AI Study Assistant
 
 An intelligent learning companion powered by AI that helps students understand concepts, create summaries, generate quizzes, and make flashcards.
+<img width="1440" height="1020" alt="SCR-20260501-bpcy" src="https://github.com/user-attachments/assets/29f704bc-d4b3-4c0f-8009-3d554ecb93b2" />
 
 ## ✨ Features
 
